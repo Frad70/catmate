@@ -13,10 +13,35 @@ Verdict comes from `tools/gates.sh`.
 | G1 | FEN round-trip, zobrist incremental == recomputed | **GREEN** | `✅ G1 GREEN` — 157 FENs round-trip, `incremental key survived 10000 random mutations` |
 | G2 | perft matches the whole corpus | **GREEN** | `nodes: 759394690 in 19.593s` · `mismatches: 0` |
 | G3 | fresh oracle positions, corpus ≥ 1000 | **GREEN** | `✅ G3 GREEN` — 1007 positions |
-| G4 | plays 100 clean self-play games over UCI | **GREEN** | `illegal: 0` `crashes: 0` `timeouts: 0` over 100 games |
+| G4 | plays 100 clean self-play games over UCI | **GREEN** | `illegal: 0` `crashes: 0` `timeouts: 0`; 83 of 100 games end in mate |
 | G5 | HEAD ≥ 55% vs tagged `baseline` over 200 games | RED | no baseline tag yet |
 
 ## Where things stand
+
+**Iteration 10** taught the search that repetition exists.
+
+- `Limits.History` carries the keys of every position already played; the UCI
+  layer collects them while replaying `position ... moves`, because a repetition
+  can only be seen against positions that actually occurred.
+- Inside the search, `path[ply]` records the current line. A position seen
+  earlier in the line *or* in the game history scores 0 at once — one repetition
+  inside the tree is enough, since whoever wants the draw can always walk the
+  loop again. `Halfmove() >= 100` scores 0 too.
+- A draw scored 0 from the side to move is what makes a winning engine stop
+  repeating and a losing one start trying to.
+
+The effect on 100 self-play games, against the same run one iteration earlier:
+
+    threefold repetition:  53  ->  10
+    checkmate:             45  ->  83
+    fifty-move rule:        0  ->   1
+    insufficient material:  2  ->   6
+    illegal: 0   crashes: 0   timeouts: 0
+    ✅ G4 GREEN
+
+Games are decisive now: five in six end in mate instead of one in two ending in
+a shuffle. That collapse is the test — there is no oracle for "played better",
+which is exactly why G5 is a match and not an opinion.
 
 **Iteration 9** built the referee. G4 is green — the engine plays real games.
 
@@ -337,6 +362,8 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **10** — repetition and fifty-move awareness in the search, game history fed
+  from the UCI layer. Threefold draws fell 53 → 10, mates rose 45 → 83.
 - **9** — `internal/game` (referee) and `cmd/gauntlet` (match runner). G4 GREEN:
   100 games, 0 illegal, 0 crashes, 0 timeouts, every game ended by a chess rule.
   Oracle caught a wrong insufficient-material rule before it shipped.

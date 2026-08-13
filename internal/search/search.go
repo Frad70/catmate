@@ -36,6 +36,11 @@ type Limits struct {
 	Depth    int           // hard depth cap; 0 means "as deep as time allows"
 	MoveTime time.Duration // wall clock for this move; 0 means no clock
 	Nodes    uint64        // node cap; 0 means unlimited
+
+	// History holds the position keys already played in this game, oldest
+	// first. Without it the engine cannot see that a line it likes repeats a
+	// position the opponent would happily claim a draw from.
+	History []uint64
 }
 
 type Result struct {
@@ -62,6 +67,12 @@ type Searcher struct {
 
 	pv       [maxPly][maxPly]movegen.Move
 	pvLength [maxPly]int
+
+	// path is the key of every position on the current line, and history is
+	// the keys of positions already played. Together they answer "have we been
+	// here before".
+	path    [maxPly]uint64
+	history []uint64
 }
 
 func New() *Searcher { return &Searcher{} }
@@ -82,6 +93,7 @@ func (s *Searcher) Ready() { s.stopped.Store(false) }
 func (s *Searcher) Search(p *board.Position, lim Limits) Result {
 	s.nodes = 0
 	s.maxNodes = lim.Nodes
+	s.history = lim.History
 	if lim.MoveTime > 0 {
 		s.deadline = time.Now().Add(lim.MoveTime)
 	} else {
@@ -114,6 +126,28 @@ func (s *Searcher) Search(p *board.Position, lim Limits) Result {
 	return best
 }
 
+// isDraw reports a repetition or the fifty-move rule. One repetition inside the
+// tree counts as a draw rather than waiting for a third occurrence: whoever
+// wants the draw can always walk round the loop again, so the line is worth
+// nothing to the side trying to win.
+func (s *Searcher) isDraw(p *board.Position, ply int) bool {
+	if p.Halfmove() >= 100 {
+		return true
+	}
+	key := p.Key()
+	for i := ply - 1; i >= 0; i-- {
+		if s.path[i] == key {
+			return true
+		}
+	}
+	for _, played := range s.history {
+		if played == key {
+			return true
+		}
+	}
+	return false
+}
+
 // outOfTime is checked on a node counter rather than every node, because
 // time.Now costs more than a few nodes of search.
 func (s *Searcher) outOfTime() bool {
@@ -134,9 +168,15 @@ func (s *Searcher) outOfTime() bool {
 func (s *Searcher) alphaBeta(p *board.Position, depth, alpha, beta, ply int) int {
 	s.pvLength[ply] = 0
 	s.nodes++
+	s.path[ply] = p.Key()
 
 	if ply > 0 && s.outOfTime() {
 		return alpha
+	}
+	// A draw is worth nothing to whoever is winning and everything to whoever
+	// is losing, which is exactly what scoring it 0 from the side to move says.
+	if ply > 0 && s.isDraw(p, ply) {
+		return 0
 	}
 	if depth <= 0 {
 		if s.staticLeaves {

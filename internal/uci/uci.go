@@ -29,6 +29,7 @@ type Engine struct {
 
 	mu       sync.Mutex
 	pos      *board.Position
+	history  []uint64 // keys of every position of this game, the current one last
 	searcher *search.Searcher
 
 	// searching is held for the lifetime of one go/bestmove pair so quit can
@@ -41,6 +42,7 @@ func NewEngine(out io.Writer) *Engine {
 	return &Engine{
 		out:      bufio.NewWriter(out),
 		pos:      pos,
+		history:  []uint64{pos.Key()},
 		searcher: search.New(),
 	}
 }
@@ -131,6 +133,9 @@ func (e *Engine) setPosition(fen string, moves []string) {
 		e.send("info string bad fen: %v", err)
 		return
 	}
+	// The keys are collected as the game is replayed, because a repetition can
+	// only be seen against the positions that actually occurred.
+	history := []uint64{pos.Key()}
 	for _, text := range moves {
 		var list movegen.MoveList
 		movegen.GenerateLegal(pos, &list)
@@ -138,6 +143,7 @@ func (e *Engine) setPosition(fen string, moves []string) {
 		for _, m := range list.Slice() {
 			if m.String() == text {
 				movegen.Make(pos, m)
+				history = append(history, pos.Key())
 				found = true
 				break
 			}
@@ -149,6 +155,7 @@ func (e *Engine) setPosition(fen string, moves []string) {
 	}
 	e.mu.Lock()
 	e.pos = pos
+	e.history = history
 	e.mu.Unlock()
 }
 
@@ -157,6 +164,7 @@ func (e *Engine) cmdGo(args []string) {
 
 	e.mu.Lock()
 	pos, err := board.ParseFEN(e.pos.FEN()) // the search gets its own copy
+	limits.History = append([]uint64(nil), e.history...)
 	e.mu.Unlock()
 	if err != nil {
 		e.send("info string cannot copy position: %v", err)

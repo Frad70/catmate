@@ -221,3 +221,52 @@ func TestPrincipalVariationIsPlayable(t *testing.T) {
 	}
 	t.Logf("PV: %v", res.PV)
 }
+
+// TestAvoidsRepetitionWhenWinning is the whole point of feeding history into
+// the search: a rook up, the engine must not step back into a position the
+// game has already seen, because that line is worth nothing.
+func TestAvoidsRepetitionWhenWinning(t *testing.T) {
+	const fen = "4k3/8/8/8/8/8/8/R3K3 w - - 0 1"
+	root, err := board.ParseFEN(fen)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Work out the key that Ra1-a2 leads to, and claim the game has been there.
+	probe, _ := board.ParseFEN(fen)
+	var list movegen.MoveList
+	movegen.GenerateLegal(probe, &list)
+	var repeat movegen.Move
+	for _, m := range list.Slice() {
+		if m.String() == "a1a2" {
+			repeat = m
+		}
+	}
+	if repeat == 0 {
+		t.Fatal("a1a2 is not legal here")
+	}
+	movegen.Make(probe, repeat)
+	seen := probe.Key()
+
+	res := New().Search(root, Limits{Depth: 5, History: []uint64{root.Key(), seen}})
+	if res.Best.String() == "a1a2" {
+		t.Errorf("repeated a seen position while a rook up (score %d)", res.Score)
+	}
+	if res.Score <= 0 {
+		t.Errorf("score %d while a rook up; the engine should not think this is drawn", res.Score)
+	}
+}
+
+// TestFiftyMoveCounterEndsTheLine checks the other half: with the clock at 99,
+// every reply reaches 100 and the position is drawn however much material is on
+// the board.
+func TestFiftyMoveCounterEndsTheLine(t *testing.T) {
+	pos, err := board.ParseFEN("4k3/8/8/8/8/8/8/R3K3 w - - 99 60")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := New().Search(pos, Limits{Depth: 3})
+	if res.Score != 0 {
+		t.Errorf("score %d, want 0: every move here hits the fifty-move rule", res.Score)
+	}
+}
