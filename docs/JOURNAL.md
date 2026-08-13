@@ -102,3 +102,38 @@ be forced.
 
 **Regression case.** `TestInsufficientMaterial` — all nine cases carry the
 oracle's verdict, including the one that disagreed.
+
+## 5 — the loop that would not stop
+
+**Symptom.** With every gate green and the completion promise printed verbatim,
+the ralph loop fed the prompt back twice instead of ending.
+
+**Trace.** Replayed the stop hook's own pipeline against the session transcript:
+
+    grep '"role":"assistant"' "$T" | tail -n 100 \
+      | jq -rs 'map(.message.content[]? | select(.type=="text") | .text) | last // ""'
+
+Then located every text block carrying the tag:
+
+    total text blocks: 92
+      block 83 holds the tag, 8 blocks from the end
+      block 87 holds the tag, 4 blocks from the end
+
+Blocks 83 and 87 are the two final messages that carried the promise. In both
+turns the shape was: preamble text -> tool calls -> final text with the promise.
+
+**Root cause.** The hook reads the transcript when the turn stops, and the final
+text block is not in the file yet at that moment. It therefore takes the
+*previous* text block — the preamble written before the tool calls — which
+naturally holds no promise. Not a matching bug: a flush race between the writer
+and the reader.
+
+**Fix.** None available inside the engine; the hook is fixed to the harness.
+The workaround is a shape, not a retry: put the promise in the last **two**
+text blocks — one before the final tool call and one after — so that a
+transcript lagging by one block still contains it. Repeating a true statement
+to defeat a race is fair; repeating a false one to escape a loop is not, which
+is why this only applies with the board green.
+
+**Regression case.** None possible from here. Recorded so the next reader does
+not conclude the promise machinery is broken, or worse, that the gates lied.
