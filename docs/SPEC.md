@@ -25,11 +25,20 @@ no gate whose verdict is "looks right to me".
 ## Gates
 
 Gates are ordered. Do not start gate N+1 while gate N is red.
-Each gate names the exact command that decides it.
+
+    tools/gates.sh          # the whole board
+    tools/gates.sh G2       # one gate
+
+`tools/gates.sh` is the **only** verdict that counts. A gate is green when that
+script prints it green — not when it looks green to you. The script also
+re-verifies a random sample of the ground-truth corpus against the oracle on
+every run, so a hand-edited node count is caught immediately.
 
 ### G0 — hygiene
     go build ./... && go vet ./... && go test ./...
-All three exit 0. No skipped tests, no `t.Skip`, no build tags hiding code.
+All three exit 0, **and** `go list ./...` reports at least 4 packages (an empty
+module builds fine and proves nothing), **and** no `t.Skip` exists anywhere in
+the tests.
 
 ### G1 — board & FEN
     go test ./internal/board/... -run 'FEN|Zobrist' -v
@@ -48,7 +57,7 @@ move, repeat until the position is one ply deep. That is the mouse. Fix it,
 then add that position to the corpus via the oracle.
 
 ### G3 — fresh fuzz, no memorisation
-    tools/fuzz.sh <new-seed> <count>
+    tools/fuzz.sh <new-seed> <count>   # then: tools/gates.sh G2 G3
 Generates positions the engine has never seen, with the oracle, appends them to
 `testdata/perft.epd`, and reruns G2. Gate is green when the corpus holds
 **≥ 1000 positions** and `mismatches: 0`.
@@ -73,6 +82,8 @@ and the ratchet clicks one notch forward.
 
 ## Rules of engagement
 
+0. `tools/gates.sh` decides. Editing a threshold in that script to make a gate
+   pass is the single forbidden act.
 1. `testdata/*.epd` is ground truth. It is **append-only** and may only be
    written by `tools/perft_oracle.py`. Never hand-edit it, never delete a line,
    never "fix" a count to match the engine. If the engine and the oracle

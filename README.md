@@ -38,3 +38,16 @@ actually catch the mouse.
     tools/ratchet.sh                                        # G5
 
 Purr when they are green. Hiss when they are not.
+
+## How development is driven
+
+`PROMPT.md` is fed to a [ralph loop](https://ghuntley.com/ralph/) — the same
+prompt, every iteration, until the gates are green:
+
+    /ralph-loop "$(cat PROMPT.md)" \
+        --completion-promise 'CATMATE G0-G5 GREEN' \
+        --max-iterations 200
+
+Each iteration starts by reading `PROGRESS.md`, moves the lowest red gate by
+one small step, proves it with a real command, and commits. No subagents, no
+slash commands inside the loop — plain tools, plain code, plain node counts.

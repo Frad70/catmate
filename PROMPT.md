@@ -9,6 +9,8 @@ iteration. Your context does not survive; **the repository does**.
 1. Read `PROGRESS.md`. It is your only memory. Trust it over your instincts.
 2. Read `docs/SPEC.md`. Gates G0–G5 are ordered; they define "done".
 3. Run: `git log --oneline -8 && git status --short`.
+4. Run `tools/gates.sh` (or just the gates near your work — it takes a while).
+   That script is the only verdict. Your opinion about a gate does not count.
 
 Then pick **the lowest gate that is not green** and do the **smallest step that
 moves it**. One step per iteration. Not a rewrite. Not three features.
@@ -23,7 +25,9 @@ moves it**. One step per iteration. Not a rewrite. Not three features.
   delete a line, never trim the corpus. Engine vs oracle disagreement means the
   **engine** is wrong until a `divide` trace proves otherwise in `docs/JOURNAL.md`.
 - **Never weaken a gate to pass it.** No `t.Skip`, no lowered thresholds, no
-  shrunken game counts, no commenting out a failing case, no `-short`.
+  shrunken game counts, no commenting out a failing case, no `-short`, and
+  never edit a threshold in `tools/gates.sh`. Making the ruler shorter is not
+  progress.
 - **Correctness before speed.** Optimise only what `go test -bench` calls slow.
 - Every fixed bug earns a regression case: a corpus position or a Go test.
 
@@ -42,8 +46,8 @@ corpus with the oracle, commit.
 
 ## End of every iteration — never skip
 
-1. Run the gate commands you touched; paste real output, never a summary from
-   memory.
+1. Run `tools/gates.sh` for the gates you touched; paste its real output, never
+   a summary from memory.
 2. Update `PROGRESS.md`: gate status (RED/GREEN + the command output line that
    proves it), what changed this iteration, the single next step, and anything
    you suspect but have not verified.

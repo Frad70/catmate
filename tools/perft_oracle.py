@@ -10,6 +10,7 @@ Usage:
     perft_oracle.py perft  "<FEN>" <depth>
     perft_oracle.py divide "<FEN>" <depth>
     perft_oracle.py gen --out testdata/perft.epd --count 200 --seed 1 [--budget 400000]
+    perft_oracle.py check testdata/perft.epd --count 5 --seed 7
 
 EPD line format (one position per line):
     <FEN> ;D1 <nodes> ;D2 <nodes> ... ;Dn <nodes>
@@ -85,6 +86,34 @@ def random_position(rng: random.Random) -> chess.Board:
     return chess.Board()
 
 
+def cmd_check(args) -> int:
+    """Re-verify random lines of an EPD file against the oracle.
+
+    This is the anti-tamper check: if a node count was ever hand-edited to make
+    the engine look right, a sampled re-verification catches it.
+    """
+    rng = random.Random(args.seed)
+    with open(args.file) as fh:
+        lines = [ln.strip() for ln in fh if ln.strip()]
+    if not lines:
+        print("corpus is empty", file=sys.stderr)
+        return 1
+    sample = rng.sample(lines, min(args.count, len(lines)))
+    bad = 0
+    for line in sample:
+        fen, *depths = [part.strip() for part in line.split(";")]
+        board = chess.Board(fen)
+        for spec in depths:
+            tag, claimed = spec.split()
+            d = int(tag[1:])
+            actual = perft(board, d)
+            if actual != int(claimed):
+                bad += 1
+                print(f"TAMPERED {fen} D{d}: file says {claimed}, oracle says {actual}")
+    print(f"checked {len(sample)} positions, tampered: {bad}")
+    return 1 if bad else 0
+
+
 def cmd_gen(args) -> int:
     rng = random.Random(args.seed)
     lines = []
@@ -134,6 +163,12 @@ def main() -> int:
     g.add_argument("--append", action="store_true")
     g.add_argument("--classics", action="store_true")
     g.set_defaults(func=cmd_gen)
+
+    c = sub.add_parser("check")
+    c.add_argument("file")
+    c.add_argument("--count", type=int, default=5)
+    c.add_argument("--seed", type=int, default=7)
+    c.set_defaults(func=cmd_check)
 
     args = ap.parse_args()
     if args.cmd == "perft":

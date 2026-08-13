@@ -4,6 +4,7 @@
 #   tools/ratchet.sh [games] [movetime_ms]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
 
 GAMES="${1:-200}"
 MOVETIME="${2:-100}"
@@ -19,7 +20,7 @@ go build -o bin/catmate ./cmd/catmate
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 git worktree add -q --detach "$WORK" baseline
-( cd "$WORK" && go build -o "$OLDPWD/bin/catmate-baseline" ./cmd/catmate )
+( cd "$WORK" && go build -o "$ROOT/bin/catmate-baseline" ./cmd/catmate )
 git worktree remove --force "$WORK"
 trap - EXIT
 
