@@ -5,45 +5,45 @@ a gate is GREEN only if the pasted output below proves it *right now*.
 
 ## Gate board — ALL GREEN
 
-One run of `tools/gates.sh`, iteration 10, every gate in the same invocation:
+Re-verified in iteration 11, one invocation of `tools/gates.sh`, working tree
+clean at `60b3b5b`:
 
     G0 hygiene
       ✅ G0 GREEN
     G1 board & zobrist
       ✅ G1 GREEN
-    corpus integrity (anti-tamper sample)
     checked 5 positions, tampered: 0
     G2 perft vs corpus
     positions: 1007
-    nodes: 759394690 in 20.887s (36356743 nps)
+    nodes: 759394690 in 22.244s (34139524 nps)
     mismatches: 0
       ✅ G2 GREEN
     G3 corpus breadth
       ✅ G3 GREEN
     G4 self-play sanity (100 games)
-    games: 100 in 1m50.556s
-    moves: 12458 total, 124.6 per game
-      threefold repetition:  16
-      insufficient material: 4
-      checkmate:             80
+    games: 100 in 1m54.958s
+    moves: 12692 total, 126.9 per game
+      threefold repetition:  15
+      checkmate:             78
+      insufficient material: 7
+    A: +37 =22 -41
+    score: 48.0% (48.0/100) elo -14 +/- 61
     illegal: 0
     crashes: 0
     timeouts: 0
       ✅ G4 GREEN
     G5 strength ratchet vs tag 'baseline'
-    games: 200 in 3m51.027s
-    moves: 13492 total, 67.5 per game
+    games: 200 in 4m6.764s
+    moves: 14366 total, 71.8 per game
+      threefold repetition:  55
+      insufficient material: 1
       checkmate:             144
-      threefold repetition:  47
-      insufficient material: 9
     A: +83 =56 -61
     score: 55.5% (111.0/200) elo +38 +/- 41
     illegal: 0
     crashes: 0
     timeouts: 0
       ✅ G5 GREEN
-
-    === gate board ===
       G0 GREEN
       G1 GREEN
       G2 GREEN
