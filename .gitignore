@@ -1,0 +1,8 @@
+.venv/
+bin/
+*.exe
+*.test
+*.prof
+*.pgn
+!testdata/*.pgn
+.claude/ralph-loop.local.md
