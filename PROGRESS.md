@@ -3,18 +3,66 @@
 The loop's only memory. Newest state at the top. Keep it short and true:
 a gate is GREEN only if the pasted output below proves it *right now*.
 
-## Gate board
+## Gate board — ALL GREEN
 
-Verdict comes from `tools/gates.sh`.
+One run of `tools/gates.sh`, iteration 10, every gate in the same invocation:
 
-| Gate | What it proves | Status | Evidence |
-|------|----------------|--------|----------|
-| G0 | build + vet + tests clean, ≥ 4 packages | **GREEN** | `✅ G0 GREEN` (5 packages) |
-| G1 | FEN round-trip, zobrist incremental == recomputed | **GREEN** | `✅ G1 GREEN` — 157 FENs round-trip, `incremental key survived 10000 random mutations` |
-| G2 | perft matches the whole corpus | **GREEN** | `nodes: 759394690 in 19.593s` · `mismatches: 0` |
-| G3 | fresh oracle positions, corpus ≥ 1000 | **GREEN** | `✅ G3 GREEN` — 1007 positions |
-| G4 | plays 100 clean self-play games over UCI | **GREEN** | `illegal: 0` `crashes: 0` `timeouts: 0`; 83 of 100 games end in mate |
-| G5 | HEAD ≥ 55% vs tagged `baseline` over 200 games | RED | no baseline tag yet |
+    G0 hygiene
+      ✅ G0 GREEN
+    G1 board & zobrist
+      ✅ G1 GREEN
+    corpus integrity (anti-tamper sample)
+    checked 5 positions, tampered: 0
+    G2 perft vs corpus
+    positions: 1007
+    nodes: 759394690 in 20.887s (36356743 nps)
+    mismatches: 0
+      ✅ G2 GREEN
+    G3 corpus breadth
+      ✅ G3 GREEN
+    G4 self-play sanity (100 games)
+    games: 100 in 1m50.556s
+    moves: 12458 total, 124.6 per game
+      threefold repetition:  16
+      insufficient material: 4
+      checkmate:             80
+    illegal: 0
+    crashes: 0
+    timeouts: 0
+      ✅ G4 GREEN
+    G5 strength ratchet vs tag 'baseline'
+    games: 200 in 3m51.027s
+    moves: 13492 total, 67.5 per game
+      checkmate:             144
+      threefold repetition:  47
+      insufficient material: 9
+    A: +83 =56 -61
+    score: 55.5% (111.0/200) elo +38 +/- 41
+    illegal: 0
+    crashes: 0
+    timeouts: 0
+      ✅ G5 GREEN
+
+    === gate board ===
+      G0 GREEN
+      G1 GREEN
+      G2 GREEN
+      G3 GREEN
+      G4 GREEN
+      G5 GREEN
+    ALL GATES GREEN
+
+**Read G5 honestly.** It cleared its bar at 55.5%, and the bar is 55%. The
+error bar is `+38 +/- 41` elo, so the improvement is not distinguishable from
+zero at 95% confidence, and an earlier 200-game run of the same pair scored
+57.2%. The gate is green because the gate asks for a score, and the score is
+there — but nobody should read this as "51 elo stronger". Two hundred games at
+100 ms is a coarse ruler.
+
+**And the ratchet is meant to click.** Moving the `baseline` tag to this commit
+turns G5 red again immediately, which is the point of a ratchet: green means
+"beat the last one", never "finished". The tag has deliberately been left where
+it is, so the run above stays reproducible.
 
 ## Where things stand
 
