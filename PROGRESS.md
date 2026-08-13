@@ -9,7 +9,7 @@ Verdict comes from `tools/gates.sh`.
 
 | Gate | What it proves | Status | Evidence |
 |------|----------------|--------|----------|
-| G0 | build + vet + tests clean, ≥ 4 packages | RED | `only 2 packages; the engine is not built yet (need >= 4)` |
+| G0 | build + vet + tests clean, ≥ 4 packages | RED | `only 3 packages; the engine is not built yet (need >= 4)` |
 | G1 | FEN round-trip, zobrist incremental == recomputed | **GREEN** | `✅ G1 GREEN` — 157 FENs round-trip, `incremental key survived 10000 random mutations` |
 | G2 | perft matches the whole corpus | RED | `cmd/catmate` does not exist |
 | G3 | fresh oracle positions, corpus ≥ 1000 | RED | corpus holds 157 |
@@ -17,6 +17,36 @@ Verdict comes from `tools/gates.sh`.
 | G5 | HEAD ≥ 55% vs tagged `baseline` over 200 games | RED | no baseline tag yet |
 
 ## Where things stand
+
+**Iteration 3** built `internal/movegen`: pseudo-legal moves, nothing filtered.
+
+- `Move` is a uint16 — from, to, and a 4-bit flag whose bit 2 means capture and
+  bit 3 means promotion, so both questions are one mask. `MoveList` is a fixed
+  256-move array, so generation allocates nothing.
+- Knights, kings and pawn attacks come from tables built at init by stepping in
+  file/rank terms, which is what stops a knight on h1 wrapping onto the a-file.
+  Sliders walk rays; no magic bitboards until a benchmark asks for them.
+- Pawns: pushes, double pushes, captures, en passant, and all four promotion
+  pieces (capture and quiet). Castling checks rights and an empty path only —
+  king-in-check, crossing check and landing in check are legality questions and
+  belong with the legality filter.
+- `Attacked()` walks outward from the square instead of scanning every enemy
+  piece, and `InCheck()` sits on top of it. Both are needed for legality next.
+- Tests, all passing: the corpus invariant below, 20 moves from the start
+  position, jumper and slider counts on an empty board, four promotion pieces,
+  promotion-captures flagged as both, en passant generated and flagged, castles
+  needing rights *and* a clear path, six attack cases including a blocked rook,
+  attack-table symmetry, and move encode/decode over every from-square.
+
+**The strongest check available before make/unmake exists:** every legal move is
+pseudo-legal, so the generated count can never fall below the oracle's depth-1
+count. Across all 157 corpus positions it never does:
+
+    checked 157 positions; largest pseudo-legal surplus 41 at
+    "r1b1k1nr/8/Qp2pb1p/p2p1B1p/1PPP1P2/1N2P1q1/nB6/R3K1NR w Q - 0 26"
+
+A surplus of 41 is exactly what a position with a king in check should look
+like: nearly every move is pseudo-legal and nearly none is legal.
 
 **Iteration 2** closed G1 honestly.
 
@@ -58,20 +88,29 @@ but nobody has run them yet.
 
 ## Next step (exactly one)
 
-`internal/movegen`: a `Move` type (from, to, promotion, flags packed into a
-uint16 or uint32) and **pseudo-legal** generation for every piece — pawn pushes,
-double pushes, captures, promotions, en passant; knight and king jumps from
-precomputed attack tables; sliders by simple ray walking. No legality filtering
-and no make/unmake yet; that is the step after. Test it against hand-counted
-move counts in a handful of positions, not against perft — perft needs legal
-moves and make/unmake, which is gate G2's business.
+Make/unmake in `internal/board` (or a new `internal/position` layer if the
+import graph fights back): apply a `Move` to a `Position` and undo it exactly,
+maintaining the zobrist key, castling rights, en passant square and both clocks
+through every special case — double push sets the ep square, en passant removes
+a pawn that is *not* on the destination square, castling moves the rook too, a
+rook moving or being captured strips the matching right, and promotion swaps
+the piece.
+
+Keep an undo record (captured piece, previous rights, previous ep, previous
+halfmove clock, previous key) so unmake needs no recomputation. Then extend the
+zobrist test to walk *legal moves* rather than random edits, asserting
+`Key() == ComputeKey()` and full state restoration after every unmake. That
+walk is where castling and en passant desyncs actually surface.
+
+Legality itself follows the cheap route first: make the move, ask whether our
+king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Suspicions, unverified
 
 - `tools/fuzz.sh` and `tools/ratchet.sh` have never run end-to-end; they call
   binaries that do not exist. Expect flag mismatches on first contact.
-- G0 needs ≥ 4 packages, so it stays red until `movegen` and `cmd/catmate`
-  exist. That is the gate working as intended, not a blocker: the natural build
+- G0 needs ≥ 4 packages; three exist now (`board`, `epd`, `movegen`), so it
+  goes green with `cmd/catmate`. That is the gate working as intended, not a blocker: the natural build
   order is board → movegen → cmd/catmate → search/eval, and G0 goes green on
   the way.
 - The zobrist walk uses random *edits*, not legal moves, because move generation
@@ -85,6 +124,9 @@ moves and make/unmake, which is gate G2's business.
 
 ## Iteration log
 
+- **3** — `internal/movegen`: Move/MoveList, attack tables, pseudo-legal
+  generation, `Attacked`/`InCheck`. Pseudo-legal ⊇ legal verified on all 157
+  corpus positions. G0 still red at 3 packages.
 - **2** — zobrist keys, state hidden behind accessors, `Put` made replacing.
   G1 GREEN: 157/157 FENs round-trip and the incremental key survived 10 000
   mutations.
