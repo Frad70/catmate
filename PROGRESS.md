@@ -18,6 +18,38 @@ Verdict comes from `tools/gates.sh`.
 
 ## Where things stand
 
+**Iteration 8** gave the engine a mouth: `internal/uci`, wired into
+`cmd/catmate` (no arguments now means "speak UCI", which is how a match runner
+launches it).
+
+- Handshake, `isready` answered even mid-search, `ucinewgame`, `position
+  startpos|fen ... moves ...`, `go depth|nodes|movetime|infinite|wtime btime
+  winc binc`, `stop`, `quit`. `info depth ... score cp|mate ... nodes ... pv`
+  each iteration, then `bestmove`.
+- `position ... moves` matches each UCI string against the *generated legal
+  moves* rather than trusting it, so a protocol slip cannot put the engine on a
+  board its opponent is not playing. An unmatched move is refused and the
+  position left untouched.
+- The search runs on its own goroutine; the reader keeps reading, which is what
+  makes `stop` and `isready` answerable at all.
+
+**Two mice, both caught by tests written before they were believed in** — see
+`docs/JOURNAL.md` 2 and 3:
+
+1. A `stop` arriving before the search goroutine was scheduled was **erased** by
+   `Search` clearing the stop flag on entry. In a real game that is an engine
+   thinking forever and losing on time. Fixed at the root: `Ready()` arms the
+   flag on the reader goroutine, and `Search` never resets it.
+2. With that fixed, a mate test began failing with `score mate -5000` — and the
+   fault was the *test*, which sent `quit` on top of a running search. No GUI
+   does that. The harness now waits for `bestmove` first, as a GUI does.
+
+All eight UCI tests pass under `-race`.
+
+    ✅ G0 GREEN  ✅ G1 GREEN  ✅ G2 GREEN  ✅ G3 GREEN
+    ❌ G4 RED — cmd/gauntlet does not exist
+    ❌ G5 RED — HEAD scored ?% vs baseline, need >= 55%
+
 **Iteration 7** taught the engine to think. Gates unchanged (G0–G3 green);
 this is groundwork for G4.
 
@@ -195,20 +227,28 @@ G4 begins: `internal/search` and `internal/eval`, then the UCI loop in
 `cmd/catmate`, then `cmd/gauntlet`. That is more than one step, so take the
 first piece only:
 
-**The UCI loop in `cmd/catmate`.** Commands G4 requires: `uci` (identify, then
-`uciok`), `isready` → `readyok`, `ucinewgame`, `position [startpos|fen <fen>]
-[moves <uci>...]`, `go` with `movetime`, `depth`, or `wtime/btime/winc/binc`,
-`stop`, and `quit`. Print `info depth ... score cp|mate ... nodes ... pv ...`
-each iteration and `bestmove <uci>` at the end.
+**`cmd/gauntlet`** — the match runner G4 is measured by. It launches two engine
+processes, plays N games, and counts what went wrong.
 
-Two things to get right, because they are what make a gauntlet game die:
-parsing `position ... moves` must match each UCI string against the *generated
-legal moves* rather than trusting the string, and `go` must run the search off
-the reading goroutine so `stop` can arrive mid-search.
+    go run ./cmd/gauntlet -games 100 -movetime 50 -a ./bin/catmate -b ./bin/catmate
 
-Test it by driving the binary over pipes from a Go test: a full handshake, a
-position with moves applied, a movetime search returning a legal bestmove, and
-`stop` cutting a long search short.
+It must print a summary containing `illegal: 0`, `crashes: 0` and `timeouts: 0`
+— those exact substrings are what `tools/gates.sh` greps for — plus the score
+and the reason each game ended.
+
+What it has to get right:
+- Speak the GUI half of UCI: handshake, `ucinewgame`, `position startpos moves
+  ...`, `go movetime ...`, read until `bestmove`, with a hard timeout that
+  counts a silent engine as a timeout rather than hanging the whole run.
+- Validate every returned move against its own legal move list. An illegal move
+  is the single most important thing this gate can catch, and trusting the
+  engine would make the check meaningless.
+- Adjudicate the game itself: mate, stalemate, the fifty-move rule, threefold
+  repetition (the position key from G1 is already there for it) and insufficient
+  material. Without those, drawn games run until the move limit and the summary
+  is noise.
+- Alternate colours between games and play them concurrently — 100 games at
+  50 ms a move is otherwise a long wait for one gate.
 
 OLD (kept for context): Make/unmake in `internal/board` (or a new `internal/position` layer if the
 import graph fights back): apply a `Move` to a `Position` and undo it exactly,
@@ -234,6 +274,9 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 - Perft is verified only to depth 5, and most positions only to depth 4. Deep
   tactical horizons (a fifty-move draw, threefold repetition) are not covered by
   perft at all — they belong to the game layer and G4.
+- `±Infinity` can still reach the root through an aborted search, where
+  `IsMate` reads the sentinel as a forced mate. Harmless now because an aborted
+  depth is thrown away, but it is a sentinel escaping its guard rails.
 - The search knows nothing about repetition or the fifty-move rule yet, so it
   will happily shuffle in a won position and cannot claim a draw in a lost one.
   The gauntlet must adjudicate both, and the search should learn them before G5,
@@ -260,6 +303,9 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **8** — `internal/uci` and the binary's default UCI mode. Caught and fixed a
+  lost-`stop` race that would have hung real games, plus a test harness that
+  raced every search. Eight UCI tests green under `-race`.
 - **7** — `internal/eval` (material + PST, two king tables) and
   `internal/search` (alpha-beta, iterative deepening, quiescence, MVV-LVA, PV).
   Alpha-beta proven equal to unpruned negamax and proven to actually prune.

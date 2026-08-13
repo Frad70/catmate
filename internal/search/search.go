@@ -3,6 +3,7 @@
 package search
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/Frad70/catmate/internal/board"
@@ -49,7 +50,10 @@ type Searcher struct {
 	nodes    uint64
 	deadline time.Time
 	maxNodes uint64
-	stopped  bool
+
+	// stopped is written by Stop from whichever goroutine reads UCI commands
+	// and read by the search itself, so it cannot be a plain bool.
+	stopped atomic.Bool
 
 	// staticLeaves swaps quiescence for a plain evaluation at depth 0. Tests
 	// use it to compare alpha-beta against unpruned negamax, where the leaf
@@ -62,12 +66,21 @@ type Searcher struct {
 
 func New() *Searcher { return &Searcher{} }
 
+// Stop asks the running search to give up as soon as it notices. Safe to call
+// from another goroutine, and harmless when nothing is searching.
+func (s *Searcher) Stop() { s.stopped.Store(true) }
+
+// Ready clears a previous stop. It must be called from the same goroutine that
+// issues the search, *before* the search starts — never inside Search itself.
+// A stop can arrive while the search goroutine is still being scheduled, and a
+// reset inside Search would swallow it and think forever.
+func (s *Searcher) Ready() { s.stopped.Store(false) }
+
 // Search runs iterative deepening and returns the best move it had time for.
 // A depth that runs out of clock is discarded: a half-searched depth can
 // easily be worse than the full depth below it.
 func (s *Searcher) Search(p *board.Position, lim Limits) Result {
 	s.nodes = 0
-	s.stopped = false
 	s.maxNodes = lim.Nodes
 	if lim.MoveTime > 0 {
 		s.deadline = time.Now().Add(lim.MoveTime)
@@ -83,7 +96,7 @@ func (s *Searcher) Search(p *board.Position, lim Limits) Result {
 	var best Result
 	for depth := 1; depth <= maxDepth; depth++ {
 		score := s.alphaBeta(p, depth, -Infinity, Infinity, 0)
-		if s.stopped && depth > 1 {
+		if s.stopped.Load() && depth > 1 {
 			break
 		}
 		best = Result{
@@ -104,15 +117,15 @@ func (s *Searcher) Search(p *board.Position, lim Limits) Result {
 // outOfTime is checked on a node counter rather than every node, because
 // time.Now costs more than a few nodes of search.
 func (s *Searcher) outOfTime() bool {
-	if s.stopped {
+	if s.stopped.Load() {
 		return true
 	}
 	if s.maxNodes > 0 && s.nodes >= s.maxNodes {
-		s.stopped = true
+		s.stopped.Store(true)
 		return true
 	}
 	if !s.deadline.IsZero() && s.nodes&2047 == 0 && time.Now().After(s.deadline) {
-		s.stopped = true
+		s.stopped.Store(true)
 		return true
 	}
 	return false

@@ -13,24 +13,32 @@ import (
 	"github.com/Frad70/catmate/internal/board"
 	"github.com/Frad70/catmate/internal/epd"
 	"github.com/Frad70/catmate/internal/perft"
+	"github.com/Frad70/catmate/internal/uci"
 )
 
 const usage = `catmate — a chess engine
 
 usage:
+  catmate                              speak UCI on stdin/stdout (what a GUI wants)
   catmate perft "<fen>" <depth>        node count for one position
   catmate divide "<fen>" <depth>       nodes under each root move, then the total
   catmate perftsuite <file.epd>        every position in the corpus, every depth
 `
 
 func main() {
+	// No arguments means a match runner or a GUI launched us: speak UCI.
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		if err := uci.NewEngine(os.Stdout).Run(os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	var err error
 	switch os.Args[1] {
+	case "uci":
+		err = uci.NewEngine(os.Stdout).Run(os.Stdin)
 	case "perft":
 		err = cmdPerft(os.Args[2:])
 	case "divide":
