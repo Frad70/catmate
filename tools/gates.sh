@@ -33,8 +33,18 @@ fi
 if want G1; then
   echo "G1 board & zobrist"
   if [[ ! -d internal/board ]]; then red G1 "internal/board does not exist"
-  elif go test ./internal/board/... -run 'FEN|Zobrist' -count=1 2>&1 | tail -10; then green G1
-  else red G1 "board tests failed"; fi
+  else
+    out=$(go test ./internal/board/... -run 'FEN|Zobrist' -count=1 -v 2>&1); echo "$out" | tail -6
+    fen=$(grep -cE '^--- PASS: Test.*FEN' <<<"$out")
+    zob=$(grep -cE '^--- PASS: Test.*Zobrist' <<<"$out")
+    fail=$(grep -cE '^--- FAIL|^FAIL' <<<"$out")
+    # A -run filter that matches nothing exits 0, so passing tests must be
+    # counted, not merely not-failed.
+    if [[ $fail -gt 0 ]]; then red G1 "board tests failed"
+    elif [[ $fen -lt 1 ]]; then red G1 "no passing FEN test"
+    elif [[ $zob -lt 1 ]]; then red G1 "no passing Zobrist test — half of G1 is unwritten"
+    else green G1; fi
+  fi
 fi
 
 # --- corpus integrity (guards G2 and G3) ------------------------------------
