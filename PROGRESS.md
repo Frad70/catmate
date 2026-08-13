@@ -25,8 +25,13 @@ Scaffolding only. The oracle works and the ground-truth corpus is seeded:
   classic positions; they match exactly, so the oracle is trustworthy.
 - `testdata/perft.epd` currently holds **157** positions (D1–D4, a few to D5).
 - `tools/fuzz.sh <seed> [count]` — G3. `tools/ratchet.sh` — G5.
-- `tools/gates.sh` — the gate board; it ran clean on the empty repo and its
-  anti-tamper sampling was tested by corrupting a copy of the corpus (caught).
+- `tools/gates.sh` — the gate board; it ran clean on the empty repo. Its
+  anti-tamper check was tested both ways: a corrupted count is reported and
+  exits 1, a correct one exits 0.
+- The **whole** corpus was re-verified line by line by the oracle: 157/157
+  positions recomputed at every listed depth, only the deliberately corrupted
+  copy came back tampered. So every node count in `testdata/perft.epd` is known
+  good as of this commit — a perft mismatch means the engine is wrong, always.
 - No Go code exists yet. `go.mod` declares module `github.com/Frad70/catmate`.
 
 ## Next step (exactly one)
