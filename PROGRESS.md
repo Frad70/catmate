@@ -9,14 +9,39 @@ Verdict comes from `tools/gates.sh`.
 
 | Gate | What it proves | Status | Evidence |
 |------|----------------|--------|----------|
-| G0 | build + vet + tests clean, ≥ 4 packages | RED | `only 3 packages; the engine is not built yet (need >= 4)` |
+| G0 | build + vet + tests clean, ≥ 4 packages | **GREEN** | `✅ G0 GREEN` (5 packages) |
 | G1 | FEN round-trip, zobrist incremental == recomputed | **GREEN** | `✅ G1 GREEN` — 157 FENs round-trip, `incremental key survived 10000 random mutations` |
-| G2 | perft matches the whole corpus | RED | `cmd/catmate` does not exist |
-| G3 | fresh oracle positions, corpus ≥ 1000 | RED | corpus holds 157 |
+| G2 | perft matches the whole corpus | **GREEN** | `nodes: 130649892 in 3.458s` · `mismatches: 0` |
+| G3 | fresh oracle positions, corpus ≥ 1000 | RED | `corpus holds 157 positions, need >= 1000` |
 | G4 | plays 100 clean self-play games over UCI | RED | `cmd/gauntlet` does not exist |
 | G5 | HEAD ≥ 55% vs tagged `baseline` over 200 games | RED | no baseline tag yet |
 
 ## Where things stand
+
+**Iteration 5** put the polygraph on the engine. G0, G1 and G2 are green.
+
+- `internal/perft` — plain recursive `Perft` and a `Divide` sorted by move
+  string so its output lines up with the oracle's and the two can be diffed
+  straight across. No transposition table and no bulk counting at depth 1: a TT
+  would merge positions that differ in something the key forgot, and bulk
+  counting never makes the leaf moves at all. Both hide the bugs perft exists
+  to find.
+- `cmd/catmate` — `perft`, `divide`, `perftsuite`. The suite runs positions in
+  parallel (they are independent) and sorts the report back into file order so
+  a failure list is reproducible.
+
+    ✅ G0 GREEN
+    ✅ G1 GREEN
+    positions: 157
+    nodes: 130649892 in 3.458s (37783889 nps)
+    mismatches: 0
+    ✅ G2 GREEN
+
+**130,649,892 nodes and not one disagreement with the oracle**, at every depth
+the corpus records. Move generation, legality, make/unmake and the zobrist key
+all held on the first serious contact — which is pleasant and slightly
+suspicious. The corpus is only 157 positions, mostly depth 4; G3 exists exactly
+to stop that from being the whole story.
 
 **Iteration 4** made moves reversible, and legality is in.
 
@@ -116,17 +141,21 @@ but nobody has run them yet.
 
 ## Next step (exactly one)
 
-`cmd/catmate` — the fourth package, which turns G0 green and unlocks G2:
+G3: grow the corpus past 1000 positions with **fresh** oracle-generated
+positions and rerun G2 against them.
 
-    catmate perft "<fen>" <depth>          -> a single node count
-    catmate divide "<fen>" <depth>         -> "<uci> <nodes>" lines, then "total <n>"
-    catmate perftsuite testdata/perft.epd  -> per-line PASS/FAIL, ends "mismatches: 0"
+    tools/fuzz.sh <new-seed> 200        # repeat with different seeds
 
-`divide` must print the same shape as `tools/perft_oracle.py divide` so the two
-can be diffed straight across when a count disagrees. Perft itself is the plain
-recursive walk over `GenerateLegal` + `Make`/`Unmake`; no bulk counting at depth
-1 until a benchmark asks, and no transposition table — perft with a TT hides the
-very bugs this is meant to catch.
+Generation is the slow half — python-chess computes every node itself, roughly
+50k nodes per position — so run it in the background and let it finish rather
+than shrinking the count. Do **not** reuse seed 20260813; that is the batch
+already in the file, and re-verifying positions the engine has already passed
+proves nothing.
+
+This is where the remaining mice live, if any do: 157 positions cannot cover
+under-promotion under check, double check with an en passant escape, or a
+castling right lost to a rook captured on its home square. Every mismatch gets
+a `divide` bisect and a journal entry.
 
 OLD (kept for context): Make/unmake in `internal/board` (or a new `internal/position` layer if the
 import graph fights back): apply a `Move` to a `Position` and undo it exactly,
@@ -147,8 +176,12 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Suspicions, unverified
 
-- `tools/fuzz.sh` and `tools/ratchet.sh` have never run end-to-end; they call
-  binaries that do not exist. Expect flag mismatches on first contact.
+- `tools/ratchet.sh` has never run end-to-end; it calls `cmd/gauntlet`, which
+  does not exist. `tools/fuzz.sh` should work now that `cmd/catmate` is real,
+  but it has still never been run.
+- Perft speed is 6.6M nps single-threaded, 37M aggregate across 12 cores. Fast
+  enough that no optimisation is justified yet; revisit only if a benchmark
+  complains.
 - G0 needs ≥ 4 packages; three exist now (`board`, `epd`, `movegen`), so it
   goes green with `cmd/catmate`. That is the gate working as intended, not a blocker: the natural build
   order is board → movegen → cmd/catmate → search/eval, and G0 goes green on
@@ -164,6 +197,8 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **5** — `internal/perft` + `cmd/catmate` (perft/divide/perftsuite). G0, G1,
+  G2 GREEN: 130,649,892 nodes, `mismatches: 0`.
 - **4** — `Make`/`Unmake`/`Undo` and `GenerateLegal`. Depth-1 counts match the
   oracle on all 157 positions; 4679 moves and 142283 move pairs undo cleanly.
 - **3** — `internal/movegen`: Move/MoveList, attack tables, pseudo-legal
