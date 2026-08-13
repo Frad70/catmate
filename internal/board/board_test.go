@@ -40,17 +40,17 @@ func TestFENStartPosition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse start position: %v", err)
 	}
-	if pos.Side != White {
-		t.Errorf("side to move = %v, want White", pos.Side)
+	if pos.Side() != White {
+		t.Errorf("side to move = %v, want White", pos.Side())
 	}
-	if pos.Castle != WhiteKingside|WhiteQueenside|BlackKingside|BlackQueenside {
-		t.Errorf("castling rights = %04b, want all four", pos.Castle)
+	if pos.Castle() != WhiteKingside|WhiteQueenside|BlackKingside|BlackQueenside {
+		t.Errorf("castling rights = %04b, want all four", pos.Castle())
 	}
-	if pos.EP != SquareNone {
-		t.Errorf("en passant = %v, want none", pos.EP)
+	if pos.EP() != SquareNone {
+		t.Errorf("en passant = %v, want none", pos.EP())
 	}
-	if pos.Fullmove != 1 || pos.Halfmove != 0 {
-		t.Errorf("clocks = %d/%d, want 0/1", pos.Halfmove, pos.Fullmove)
+	if pos.Fullmove() != 1 || pos.Halfmove() != 0 {
+		t.Errorf("clocks = %d/%d, want 0/1", pos.Halfmove(), pos.Fullmove())
 	}
 	if got := pos.PieceAt(0); got != MakePiece(White, Rook) {
 		t.Errorf("a1 holds %c, want white rook", got.Char())

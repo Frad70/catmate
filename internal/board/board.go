@@ -108,11 +108,16 @@ type Position struct {
 	byColor [2]Bitboard
 	mailbox [64]Piece
 
-	Side     Color
-	Castle   CastleRights
-	EP       Square // target square behind a double push, or SquareNone
-	Halfmove int
-	Fullmove int
+	side     Color
+	castle   CastleRights
+	ep       Square // target square behind a double push, or SquareNone
+	halfmove int
+	fullmove int
+
+	// key is maintained incrementally. Every mutation below xors it, which is
+	// why the state fields are unexported: a stray assignment would desync the
+	// hash, and nothing would notice until the transposition table lied.
+	key uint64
 }
 
 const StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -129,14 +134,50 @@ func (p *Position) clear() {
 	for i := range p.mailbox {
 		p.mailbox[i] = NoPiece
 	}
-	p.Side = White
-	p.Castle = 0
-	p.EP = SquareNone
-	p.Halfmove = 0
-	p.Fullmove = 1
+	p.side = White
+	p.castle = 0
+	p.ep = SquareNone
+	p.halfmove = 0
+	p.fullmove = 1
+	p.key = 0
 }
 
 func (p *Position) PieceAt(s Square) Piece { return p.mailbox[s] }
+
+func (p *Position) Side() Color          { return p.side }
+func (p *Position) Castle() CastleRights { return p.castle }
+func (p *Position) EP() Square           { return p.ep }
+func (p *Position) Halfmove() int        { return p.halfmove }
+func (p *Position) Fullmove() int        { return p.fullmove }
+
+// Key is the zobrist hash of the position, maintained incrementally.
+func (p *Position) Key() uint64 { return p.key }
+
+func (p *Position) SetSide(c Color) {
+	if p.side != c {
+		p.side = c
+		p.key ^= zobristSide
+	}
+}
+
+func (p *Position) SetCastle(r CastleRights) {
+	p.key ^= zobristCastle[p.castle]
+	p.castle = r
+	p.key ^= zobristCastle[p.castle]
+}
+
+func (p *Position) SetEP(s Square) {
+	if p.ep != SquareNone {
+		p.key ^= zobristEPFile[p.ep.File()]
+	}
+	p.ep = s
+	if p.ep != SquareNone {
+		p.key ^= zobristEPFile[p.ep.File()]
+	}
+}
+
+func (p *Position) SetHalfmove(n int) { p.halfmove = n }
+func (p *Position) SetFullmove(n int) { p.fullmove = n }
 
 func (p *Position) Pieces(pt PieceType) Bitboard { return p.byType[pt] }
 func (p *Position) Occupied(c Color) Bitboard    { return p.byColor[c] }
@@ -145,9 +186,15 @@ func (p *Position) PiecesOf(c Color, pt PieceType) Bitboard {
 	return p.byType[pt] & p.byColor[c]
 }
 
+// Put places a piece, replacing whatever stood there. Replacing rather than
+// silently overwriting keeps the bitboards and the key consistent.
 func (p *Position) Put(s Square, pc Piece) {
+	if p.mailbox[s] != NoPiece {
+		p.Remove(s)
+	}
 	bit := Bitboard(1) << uint(s)
 	p.mailbox[s] = pc
+	p.key ^= zobristPiece[pc][s]
 	p.byType[pc.Type()] |= bit
 	p.byColor[pc.Color()] |= bit
 }
@@ -159,6 +206,7 @@ func (p *Position) Remove(s Square) {
 	}
 	bit := Bitboard(1) << uint(s)
 	p.mailbox[s] = NoPiece
+	p.key ^= zobristPiece[pc][s]
 	p.byType[pc.Type()] &^= bit
 	p.byColor[pc.Color()] &^= bit
 }
@@ -179,9 +227,9 @@ func ParseFEN(fen string) (*Position, error) {
 
 	switch fields[1] {
 	case "w":
-		p.Side = White
+		p.side = White
 	case "b":
-		p.Side = Black
+		p.side = Black
 	default:
 		return nil, fmt.Errorf("bad side to move %q", fields[1])
 	}
@@ -195,7 +243,7 @@ func ParseFEN(fen string) (*Position, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bad en passant square: %w", err)
 		}
-		p.EP = sq
+		p.ep = sq
 	}
 
 	if len(fields) > 4 {
@@ -203,15 +251,19 @@ func ParseFEN(fen string) (*Position, error) {
 		if err != nil || n < 0 {
 			return nil, fmt.Errorf("bad halfmove clock %q", fields[4])
 		}
-		p.Halfmove = n
+		p.halfmove = n
 	}
 	if len(fields) > 5 {
 		n, err := strconv.Atoi(fields[5])
 		if err != nil || n < 1 {
 			return nil, fmt.Errorf("bad fullmove number %q", fields[5])
 		}
-		p.Fullmove = n
+		p.fullmove = n
 	}
+
+	// Placement hashed itself through Put; the rest is set raw above, so fold
+	// it in once here.
+	p.key = p.computeKey()
 
 	return p, nil
 }
@@ -256,13 +308,13 @@ func (p *Position) parseCastling(s string) error {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case 'K':
-			p.Castle |= WhiteKingside
+			p.castle |= WhiteKingside
 		case 'Q':
-			p.Castle |= WhiteQueenside
+			p.castle |= WhiteQueenside
 		case 'k':
-			p.Castle |= BlackKingside
+			p.castle |= BlackKingside
 		case 'q':
-			p.Castle |= BlackQueenside
+			p.castle |= BlackQueenside
 		default:
 			return fmt.Errorf("bad castling rights %q", s)
 		}
@@ -297,7 +349,7 @@ func (p *Position) FEN() string {
 		}
 	}
 
-	if p.Side == White {
+	if p.side == White {
 		sb.WriteString(" w ")
 	} else {
 		sb.WriteString(" b ")
@@ -305,17 +357,17 @@ func (p *Position) FEN() string {
 
 	sb.WriteString(p.castlingString())
 	sb.WriteByte(' ')
-	sb.WriteString(p.EP.String())
+	sb.WriteString(p.ep.String())
 	sb.WriteByte(' ')
-	sb.WriteString(strconv.Itoa(p.Halfmove))
+	sb.WriteString(strconv.Itoa(p.halfmove))
 	sb.WriteByte(' ')
-	sb.WriteString(strconv.Itoa(p.Fullmove))
+	sb.WriteString(strconv.Itoa(p.fullmove))
 
 	return sb.String()
 }
 
 func (p *Position) castlingString() string {
-	if p.Castle == 0 {
+	if p.castle == 0 {
 		return "-"
 	}
 	var sb strings.Builder
@@ -328,7 +380,7 @@ func (p *Position) castlingString() string {
 		{BlackKingside, 'k'},
 		{BlackQueenside, 'q'},
 	} {
-		if p.Castle&r.right != 0 {
+		if p.castle&r.right != 0 {
 			sb.WriteByte(r.char)
 		}
 	}
