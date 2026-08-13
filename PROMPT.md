@@ -76,4 +76,8 @@ green and `PROGRESS.md` holds the pasted command output proving each one. A
 false promise is the one unforgivable sin — a cat does not lie about a mouse it
 did not catch.
 
+Never write the promise string in your reply for any other reason — not to
+quote this file, not to explain the loop, not as an example. The hook reads
+your last message literally, and an accidental promise is still a lie.
+
     <promise>CATMATE G0-G5 GREEN</promise>
