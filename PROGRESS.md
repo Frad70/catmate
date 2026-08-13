@@ -18,6 +18,34 @@ Verdict comes from `tools/gates.sh`.
 
 ## Where things stand
 
+**Iteration 7** taught the engine to think. Gates unchanged (G0–G3 green);
+this is groundwork for G4.
+
+- `internal/eval` — material plus piece-square tables, scored from the side to
+  move. Two king tables: the king hides while there is heavy material on the
+  board and walks to the centre once there is not, because without that a won
+  K+Q ending dribbles into a fifty-move draw.
+- `internal/search` — negamax with alpha-beta, iterative deepening, quiescence
+  at the leaves, MVV-LVA move ordering, mate scores adjusted by ply, a
+  principal variation table, and a movetime deadline checked every 2048 nodes.
+- A depth that runs out of clock is thrown away, not used: half a depth is
+  often worse than the whole depth below it.
+
+The two tests that matter, and they are a pair:
+
+    alpha-beta agreed with unpruned negamax on 26 positions at depth 3
+    depth 4 from the start position: 26654 nodes with alpha-beta, 206604 without
+
+The first says pruning never changed an answer. The second says it pruned at
+all — without it, a search that "agrees with negamax" might simply *be*
+negamax. Leaves are static in that comparison, because measuring against
+unpruned negamax only means something when the leaf value is a fixed function.
+
+Also passing: both mate-in-1 positions (each confirmed by the oracle to be
+legal, mate, and the *only* mate there), the hanging queen taken, a defended
+pawn left alone by quiescence, stalemate scored 0, a 100 ms budget respected,
+and every move of the returned PV legal in turn.
+
 **Iteration 6** widened the net. G0–G3 are green.
 
 - `tools/perft_oracle.py gen` now takes `--jobs` and generates in worker
@@ -167,18 +195,20 @@ G4 begins: `internal/search` and `internal/eval`, then the UCI loop in
 `cmd/catmate`, then `cmd/gauntlet`. That is more than one step, so take the
 first piece only:
 
-**`internal/eval` + `internal/search`** — material values plus a piece-square
-table, and negamax with alpha-beta, iterative deepening, and a quiescence
-search that resolves captures so the engine stops hanging pieces at the
-horizon. No transposition table yet; add it once a search exists to measure it
-against. Test what can be tested without a game: mate-in-1 found at depth 2,
-a hanging queen taken, alpha-beta returning the same score as plain negamax on
-a fixed shallow depth (that equality is the real correctness check), and the
-search staying inside a movetime budget.
+**The UCI loop in `cmd/catmate`.** Commands G4 requires: `uci` (identify, then
+`uciok`), `isready` → `readyok`, `ucinewgame`, `position [startpos|fen <fen>]
+[moves <uci>...]`, `go` with `movetime`, `depth`, or `wtime/btime/winc/binc`,
+`stop`, and `quit`. Print `info depth ... score cp|mate ... nodes ... pv ...`
+each iteration and `bestmove <uci>` at the end.
 
-Then, in later iterations: the UCI loop, `cmd/gauntlet`, and only then G5's
-ratchet — which needs a `baseline` tag that does not exist yet, so the first
-playable engine must be tagged before G5 can even run.
+Two things to get right, because they are what make a gauntlet game die:
+parsing `position ... moves` must match each UCI string against the *generated
+legal moves* rather than trusting the string, and `go` must run the search off
+the reading goroutine so `stop` can arrive mid-search.
+
+Test it by driving the binary over pipes from a Go test: a full handshake, a
+position with moves applied, a movetime search returning a legal bestmove, and
+`stop` cutting a long search short.
 
 OLD (kept for context): Make/unmake in `internal/board` (or a new `internal/position` layer if the
 import graph fights back): apply a `Move` to a `Position` and undo it exactly,
@@ -204,6 +234,14 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 - Perft is verified only to depth 5, and most positions only to depth 4. Deep
   tactical horizons (a fifty-move draw, threefold repetition) are not covered by
   perft at all — they belong to the game layer and G4.
+- The search knows nothing about repetition or the fifty-move rule yet, so it
+  will happily shuffle in a won position and cannot claim a draw in a lost one.
+  The gauntlet must adjudicate both, and the search should learn them before G5,
+  or the ratchet will measure noise.
+- No transposition table. Adding one is the obvious strength step, but it needs
+  the search that exists now as a measuring stick — and a TT bug shows up as
+  *nothing* until it quietly returns a wrong move, so it must land with the
+  zobrist-key check that G1 already provides.
 - Perft speed is 6.6M nps single-threaded, 37M aggregate across 12 cores. Fast
   enough that no optimisation is justified yet; revisit only if a benchmark
   complains.
@@ -222,6 +260,9 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **7** — `internal/eval` (material + PST, two king tables) and
+  `internal/search` (alpha-beta, iterative deepening, quiescence, MVV-LVA, PV).
+  Alpha-beta proven equal to unpruned negamax and proven to actually prune.
 - **6** — parallel oracle generation (`--jobs`), corpus 157 → 1007 with a fresh
   seed. G3 GREEN. 759,394,690 nodes, `mismatches: 0`.
 - **5** — `internal/perft` + `cmd/catmate` (perft/divide/perftsuite). G0, G1,
