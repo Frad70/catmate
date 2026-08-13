@@ -18,6 +18,34 @@ Verdict comes from `tools/gates.sh`.
 
 ## Where things stand
 
+**Iteration 4** made moves reversible, and legality is in.
+
+- `movegen.Make` / `movegen.Unmake` with an `Undo` record (captured piece, prior
+  rights, prior en passant square, both clocks, prior key). They live in
+  `movegen` rather than `board` because `Move` lives here and `board` must not
+  import its own consumer.
+- `Unmake` **never assigns the key**. It reverses the board through the same
+  mutators `Make` used and lets the incremental key find its own way home, so
+  the tests below are proving something rather than watching a value be copied.
+- Special cases handled: en passant removes a pawn that is not on the
+  destination square; castling hops the rook; a king or rook that moves loses
+  the matching right; a rook *captured where it stands* costs its owner the
+  right too; a double push arms the en passant square; promotion swaps the piece
+  and unpromotes on the way back.
+- `GenerateLegal` filters by make-ask-unmake, with castling handled separately:
+  the king may not start in check, cross an attacked square, or land on one —
+  none of which is visible in the position after the move.
+
+Evidence, all from the corpus rather than from taste:
+
+    depth-1 node counts match the oracle on all 157 positions
+    made and unmade 4679 legal moves with no drift
+    made and unmade 142283 move pairs
+
+The first line is already perft(1) against ground truth. The other two say the
+position — pieces, side, rights, en passant, both clocks, and the key — comes
+back byte-identical after every single move and every move pair.
+
 **Iteration 3** built `internal/movegen`: pseudo-legal moves, nothing filtered.
 
 - `Move` is a uint16 — from, to, and a 4-bit flag whose bit 2 means capture and
@@ -88,7 +116,19 @@ but nobody has run them yet.
 
 ## Next step (exactly one)
 
-Make/unmake in `internal/board` (or a new `internal/position` layer if the
+`cmd/catmate` — the fourth package, which turns G0 green and unlocks G2:
+
+    catmate perft "<fen>" <depth>          -> a single node count
+    catmate divide "<fen>" <depth>         -> "<uci> <nodes>" lines, then "total <n>"
+    catmate perftsuite testdata/perft.epd  -> per-line PASS/FAIL, ends "mismatches: 0"
+
+`divide` must print the same shape as `tools/perft_oracle.py divide` so the two
+can be diffed straight across when a count disagrees. Perft itself is the plain
+recursive walk over `GenerateLegal` + `Make`/`Unmake`; no bulk counting at depth
+1 until a benchmark asks, and no transposition table — perft with a TT hides the
+very bugs this is meant to catch.
+
+OLD (kept for context): Make/unmake in `internal/board` (or a new `internal/position` layer if the
 import graph fights back): apply a `Move` to a `Position` and undo it exactly,
 maintaining the zobrist key, castling rights, en passant square and both clocks
 through every special case — double push sets the ep square, en passant removes
@@ -124,6 +164,8 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **4** — `Make`/`Unmake`/`Undo` and `GenerateLegal`. Depth-1 counts match the
+  oracle on all 157 positions; 4679 moves and 142283 move pairs undo cleanly.
 - **3** — `internal/movegen`: Move/MoveList, attack tables, pseudo-legal
   generation, `Attacked`/`InCheck`. Pseudo-legal ⊇ legal verified on all 157
   corpus positions. G0 still red at 3 packages.
