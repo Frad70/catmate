@@ -13,10 +13,43 @@ Verdict comes from `tools/gates.sh`.
 | G1 | FEN round-trip, zobrist incremental == recomputed | **GREEN** | `✅ G1 GREEN` — 157 FENs round-trip, `incremental key survived 10000 random mutations` |
 | G2 | perft matches the whole corpus | **GREEN** | `nodes: 759394690 in 19.593s` · `mismatches: 0` |
 | G3 | fresh oracle positions, corpus ≥ 1000 | **GREEN** | `✅ G3 GREEN` — 1007 positions |
-| G4 | plays 100 clean self-play games over UCI | RED | `cmd/gauntlet` does not exist |
+| G4 | plays 100 clean self-play games over UCI | **GREEN** | `illegal: 0` `crashes: 0` `timeouts: 0` over 100 games |
 | G5 | HEAD ≥ 55% vs tagged `baseline` over 200 games | RED | no baseline tag yet |
 
 ## Where things stand
+
+**Iteration 9** built the referee. G4 is green — the engine plays real games.
+
+- `internal/game` decides endings from the position alone: checkmate,
+  stalemate, the fifty-move rule, threefold repetition by position key, and
+  insufficient material. No engine is asked for its opinion about the result.
+- `cmd/gauntlet` runs two engine processes against each other, alternates
+  colours, varies openings with a seeded random walk (two deterministic engines
+  from one position would play the same game a hundred times), plays games
+  concurrently, and **checks every returned move against its own legal move
+  list**. It separates a dead process (crash) from a silent one (timeout),
+  because the report is useless if those blur together.
+
+    games: 100 in 1m17.052s
+    moves: 8776 total, 87.8 per game
+      threefold repetition:  53
+      checkmate:             45
+      insufficient material: 2
+    A: +19 =55 -26
+    score: 46.5% (46.5/100) elo -24 +/- 46
+    illegal: 0
+    crashes: 0
+    timeouts: 0
+    ✅ G4 GREEN
+
+Every one of the hundred games ended by a real chess rule. Nothing was
+adjudicated by the move limit.
+
+**The number that matters is not the score — it is 53.** More than half the
+games ended in threefold repetition, which is the search shuffling because it
+has no idea repetition exists. It will happily repeat a position it is winning.
+That is the first thing to fix before the ratchet measures anything, or G5 will
+be measuring noise.
 
 **Iteration 8** gave the engine a mouth: `internal/uci`, wired into
 `cmd/catmate` (no arguments now means "speak UCI", which is how a match runner
@@ -227,28 +260,26 @@ G4 begins: `internal/search` and `internal/eval`, then the UCI loop in
 `cmd/catmate`, then `cmd/gauntlet`. That is more than one step, so take the
 first piece only:
 
-**`cmd/gauntlet`** — the match runner G4 is measured by. It launches two engine
-processes, plays N games, and counts what went wrong.
+**Teach the search about repetition and the fifty-move rule**, then run G5.
 
-    go run ./cmd/gauntlet -games 100 -movetime 50 -a ./bin/catmate -b ./bin/catmate
+The `baseline` tag now exists at the first playable engine (iteration 9), so
+`tools/ratchet.sh` can finally run. Do not start tuning before this fix: with 53
+of 100 games repeating, the ratchet would mostly measure who shuffles first.
 
-It must print a summary containing `illegal: 0`, `crashes: 0` and `timeouts: 0`
-— those exact substrings are what `tools/gates.sh` greps for — plus the score
-and the reason each game ended.
+What to do:
+- Thread the game history into the search — a slice of position keys, pushed by
+  `Make` at the root and by the search as it descends. A position seen before
+  *inside the search tree* should score 0 immediately (the usual engine
+  shortcut: one repetition inside the tree is treated as a draw, since a second
+  is available to whoever wants it).
+- Score a draw as 0 from the side to move, which means a winning engine stops
+  repeating and a losing one starts trying to.
+- Return 0 for `Halfmove() >= 100` too.
+- Then re-run G4 and expect the repetition count to collapse. That drop is the
+  test; there is no oracle for "played better", which is exactly why G5 is a
+  match rather than an opinion.
 
-What it has to get right:
-- Speak the GUI half of UCI: handshake, `ucinewgame`, `position startpos moves
-  ...`, `go movetime ...`, read until `bestmove`, with a hard timeout that
-  counts a silent engine as a timeout rather than hanging the whole run.
-- Validate every returned move against its own legal move list. An illegal move
-  is the single most important thing this gate can catch, and trusting the
-  engine would make the check meaningless.
-- Adjudicate the game itself: mate, stalemate, the fifty-move rule, threefold
-  repetition (the position key from G1 is already there for it) and insufficient
-  material. Without those, drawn games run until the move limit and the summary
-  is noise.
-- Alternate colours between games and play them concurrently — 100 games at
-  50 ms a move is otherwise a long wait for one gate.
+Only then run `tools/gates.sh G5`.
 
 OLD (kept for context): Make/unmake in `internal/board` (or a new `internal/position` layer if the
 import graph fights back): apply a `Move` to a `Position` and undo it exactly,
@@ -269,8 +300,11 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Suspicions, unverified
 
-- `tools/ratchet.sh` has never run end-to-end; it calls `cmd/gauntlet`, which
-  does not exist, and it needs a `baseline` git tag that has never been made.
+- `tools/ratchet.sh` has still never run end-to-end, but both things it needs
+  now exist: `cmd/gauntlet` and the `baseline` tag.
+- A 46.5% score between two *identical* binaries came with `elo -24 +/- 46`.
+  That is the noise floor of a 100-game match: any strength claim below about
+  50 elo needs far more games than the ratchet plays.
 - Perft is verified only to depth 5, and most positions only to depth 4. Deep
   tactical horizons (a fifty-move draw, threefold repetition) are not covered by
   perft at all — they belong to the game layer and G4.
@@ -303,6 +337,9 @@ king is attacked, unmake. Perft will say soon enough whether it is fast enough.
 
 ## Iteration log
 
+- **9** — `internal/game` (referee) and `cmd/gauntlet` (match runner). G4 GREEN:
+  100 games, 0 illegal, 0 crashes, 0 timeouts, every game ended by a chess rule.
+  Oracle caught a wrong insufficient-material rule before it shipped.
 - **8** — `internal/uci` and the binary's default UCI mode. Caught and fixed a
   lost-`stop` race that would have hung real games, plus a test harness that
   raced every search. Eight UCI tests green under `-race`.

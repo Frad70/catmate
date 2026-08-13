@@ -75,3 +75,30 @@ disappear.
 aborted search, and `IsMate` reads it as a mate. Harmless today because an
 aborted depth is discarded, but it is a sentinel escaping its own guard rails.
 Worth cornering when the search grows a transposition table.
+
+## 4 — the referee called a dead position alive
+
+**Symptom.** None yet: the rule was checked against the oracle before the test
+was written, which is the only reason it was caught at all.
+
+**Trace.** `.venv/bin/python` over eight constructed endings:
+
+    True  bare kings                4k3/8/8/8/8/8/8/4K3 w - - 0 1
+    False K+2N vs K                 4k3/8/8/8/8/8/8/2NNK3 w - - 0 1
+    True  two bishops one side      4k3/8/8/8/8/8/8/1B1BK3 w - - 0 1
+
+The first implementation counted minor pieces and only accepted "one bishop
+each, same colour". It therefore called `1B1BK3` — two light-squared bishops
+against a bare king — a live position. The oracle says dead, and the oracle is
+right: no arrangement of two same-coloured bishops can mate.
+
+**Root cause.** The rule was written as "few pieces left" rather than "mate is
+impossible". Piece *count* is a proxy; square colour is the real constraint.
+
+**Fix.** No pawns, rooks or queens, then: with no knights, every bishop on the
+board must stand on one colour; with knights, only a single knight and no
+bishops. Two knights stay live, because mate can happen even though it cannot
+be forced.
+
+**Regression case.** `TestInsufficientMaterial` — all nine cases carry the
+oracle's verdict, including the one that disagreed.
