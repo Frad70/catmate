@@ -16,6 +16,8 @@ EPD line format (one position per line):
     <FEN> ;D1 <nodes> ;D2 <nodes> ... ;Dn <nodes>
 """
 import argparse
+import concurrent.futures
+import os
 import random
 import sys
 
@@ -114,26 +116,60 @@ def cmd_check(args) -> int:
     return 1 if bad else 0
 
 
+def _one_random(task):
+    """Build one corpus line from a derived seed.
+
+    Runs in a worker process, so it must be a module-level function and must
+    depend on nothing but its argument — that is what keeps a parallel corpus
+    identical to a sequential one.
+    """
+    seed, max_depth, budget = task
+    board = random_position(random.Random(seed))
+    return epd_line(board, max_depth, budget)
+
+
+def existing_fens(path: str) -> set:
+    try:
+        with open(path) as fh:
+            return {line.split(";")[0].strip() for line in fh if line.strip()}
+    except FileNotFoundError:
+        return set()
+
+
 def cmd_gen(args) -> int:
-    rng = random.Random(args.seed)
     lines = []
     if args.classics:
         for name, fen, depth in CLASSICS:
             b = chess.Board(fen)
             lines.append(epd_line(b, depth, args.budget))
             print(f"  classic {name}", file=sys.stderr)
-    seen = set()
-    made = 0
-    while made < args.count:
-        b = random_position(rng)
-        key = b.fen()
-        if key in seen:
-            continue
-        seen.add(key)
-        lines.append(epd_line(b, args.max_depth, args.budget))
-        made += 1
-        if made % 20 == 0:
-            print(f"  random {made}/{args.count}", file=sys.stderr)
+
+    # Positions already in the file prove nothing a second time.
+    known = existing_fens(args.out) if args.append else set()
+    known |= {ln.split(";")[0].strip() for ln in lines}
+
+    if args.count:
+        jobs = args.jobs or os.cpu_count() or 1
+        # Derive a distinct seed per position so the batch is reproducible and
+        # order-independent. Over-generate to survive duplicates.
+        tasks = [
+            (args.seed * 1000003 + i, args.max_depth, args.budget)
+            for i in range(int(args.count * 1.2) + 8)
+        ]
+        made = 0
+        with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as pool:
+            for line in pool.map(_one_random, tasks, chunksize=1):
+                fen = line.split(";")[0].strip()
+                if fen in known:
+                    continue
+                known.add(fen)
+                lines.append(line)
+                made += 1
+                if made % 25 == 0:
+                    print(f"  random {made}/{args.count}", file=sys.stderr)
+                if made >= args.count:
+                    break
+
     mode = "a" if args.append else "w"
     with open(args.out, mode) as fh:
         for line in lines:
@@ -161,6 +197,7 @@ def main() -> int:
     g.add_argument("--max-depth", type=int, default=5)
     g.add_argument("--budget", type=int, default=400000)
     g.add_argument("--append", action="store_true")
+    g.add_argument("--jobs", type=int, default=0, help="worker processes (default: all cores)")
     g.add_argument("--classics", action="store_true")
     g.set_defaults(func=cmd_gen)
 

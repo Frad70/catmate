@@ -16,7 +16,7 @@ PY=".venv/bin/python"
 before=$(wc -l < testdata/perft.epd)
 "$PY" tools/perft_oracle.py gen \
   --out testdata/perft.epd --append \
-  --count "$COUNT" --seed "$SEED" --max-depth 5 --budget "$BUDGET"
+  --count "$COUNT" --seed "$SEED" --max-depth 5 --budget "$BUDGET" --jobs "$(nproc)"
 after=$(wc -l < testdata/perft.epd)
 echo "corpus: $before -> $after positions"
 
